@@ -1,0 +1,20 @@
+# Core Computing & Optimization
+numpy>=2.0.0
+scipy==1.16.2
+cvxpy>=1.7.2
+
+# Commercial Solvers (Note: Users must configure their own licenses)
+gurobipy
+mosek
+
+# Plotting & GUI
+matplotlib==3.10.0
+
+# Interactive Environment & Widgets
+# Note: Version 0.9.7 is used for compatibility with your Jupyter setup
+ipykernel
+ipympl==0.9.7
+ipywidgets==8.1.7
+
+# Miscellaneous Tools
+tomli_w
