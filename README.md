@@ -16,6 +16,12 @@ Open source Deep-Level Transient Spectroscopy (DLTS) data processing program.
     *   D2 / Contin-like regularization
     *   **Sparse Representation** (Primary contribution of this work)
 
+## Citation
+
+If you find this project useful in your research, please cite:
+
+> **DOI**: 10.1109/TPEL.2026.3666365
+
 ## Prerequisites
 
 ### Python Environment
@@ -43,8 +49,3 @@ This project relies on robust convex optimization solvers. You must have a valid
 
 The example section is still under development.
 
-## Citation
-
-If you find this project useful in your research, please cite:
-
-> **DOI**: 10.1109/TPEL.2026.3666365
