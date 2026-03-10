@@ -450,8 +450,11 @@ All LDLTS methods inherit from a common base class and share similar interfaces.
 **`class OpenDLTS_DataHandler.LDLTS_Method.L1`**
 
 L1-regularized inverse problem solver for LDLTS analysis. Promotes sparse solutions in the emission rate spectrum.
+
 L1 method solving problem:
-$$\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \cdot \left|\left|\mathbf{F}\right|\right|_1 \right\}}$$
+```math
+\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \cdot \left|\left|\mathbf{F}\right|\right|_1 \right\}}
+```
 
 #### Initialization
 
@@ -575,8 +578,11 @@ Save/load solver state to/from file.
 **`class OpenDLTS_DataHandler.LDLTS_Method.L2`**
 
 L2-regularized (Tikhonov) inverse problem solver. Produces smooth emission rate spectra.
+
 L2 method solving problem:
-$$\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \cdot \left|\left|\mathbf{F}\right|\right|_2^2 \right\}}$$
+```math
+\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \cdot \left|\left|\mathbf{F}\right|\right|_2^2 \right\}}
+```
 
 
 **Interface:** Same as `L1`
@@ -590,8 +596,11 @@ $$\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-
 **`class OpenDLTS_DataHandler.LDLTS_Method.D2`**
 
 Second-derivative regularization (Contin-like). Produces very smooth emission rate spectra similar to the CONTIN algorithm.
+
 D2 method solving problem:
-$$\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \cdot \left|\left|\frac{d\mathbf{F}}{dt}\right|\right|_2^2 \right\}}$$
+```math
+\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \cdot \left|\left|\frac{d\mathbf{F}}{dt}\right|\right|_2^2 \right\}}
+```
 
 **Interface:** Same as `L1`
 
@@ -604,9 +613,10 @@ $$\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-
 **`class OpenDLTS_DataHandler.LDLTS_Method.SR`**
 
 Sparse representation solver using dictionary learning. Represents the emission rate spectrum as a combination of predefined basis functions (word functions).
+
 SR method solving problem:
 ```math
-\begin{equation}\label{eq:proposed_method}
+\begin{equation}
 \begin{aligned}
 \begin{matrix}
     \mathrm{\mathop{arg\ min}\limits_{\mathbf{F},\ \mathbf{X}}}&\mathrm{\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \left|\left|\mathbf{R}\right|\right|_{1} \right\}}\\
@@ -659,9 +669,10 @@ Generate sparse dictionary for a single word function.
 **`class OpenDLTS_DataHandler.LDLTS_Method.SRL1`**
 
 Hybrid solver combining Sparse Representation with L1 regularization. Uses dictionary-based representation for the main spectrum with L1 regularization for residual features.
+
 SRL1 method solving problem:
 ```math
-\begin{equation}\label{eq:proposed_method}
+\begin{equation}
 \begin{aligned}
 \begin{matrix}
     \mathrm{\mathop{arg\ min}\limits_{\mathbf{F},\ \mathbf{X}}}&\mathrm{\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \left|\left|\mathbf{F^{\#}}\right|\right|_{1} \right\}}\\
