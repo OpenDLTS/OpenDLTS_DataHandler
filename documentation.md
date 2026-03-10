@@ -164,10 +164,10 @@ Trap(
 |-----------|------|---------|-------------|
 | `Ea` | `float \| None` | `None` | Activation energy [eV] (Arrhenius trap) |
 | `sigma` | `float \| None` | `None` | Capture cross-section [cm²] (Arrhenius trap) |
-| `T_power` | `float \| int` | `2` | Temperature power factor |
-| `constant_em` | `float \| None` | `None` | Constant emission rate [s⁻¹] |
+| `T_power` | `float \| int` | `2` | Temperature power factor (Arrhenius trap) |
+| `constant_em` | `float \| None` | `None` | Constant emission rate [s⁻¹] (Constant emission rate trap)|
 | `fun_amplitude_T` | `Callable \| float` | `1` | Amplitude vs temperature function |
-| `fun_em_T` | `Callable \| None` | `None` | User-defined emission rate function |
+| `fun_em_T` | `Callable \| None` | `None` | User-defined emission rate function (User-defined trap) |
 | `material` | `str` | `'Si'` | Material name (`'Si'`, `'SiC'`, `'GaN'`) |
 | `material_doping_type` | `str` | `'N'` | Doping type (`'N'` or `'P'`) |
 | `trap_type` | `str` | `'majority'` | Trap type (`'majority'` or `'minority'`) |
@@ -450,6 +450,8 @@ All LDLTS methods inherit from a common base class and share similar interfaces.
 **`class OpenDLTS_DataHandler.LDLTS_Method.L1`**
 
 L1-regularized inverse problem solver for LDLTS analysis. Promotes sparse solutions in the emission rate spectrum.
+L1 method solving problem:
+$$\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \cdot \left|\left|\mathbf{F}\right|\right|_1 \right\}}$$
 
 #### Initialization
 
@@ -573,6 +575,9 @@ Save/load solver state to/from file.
 **`class OpenDLTS_DataHandler.LDLTS_Method.L2`**
 
 L2-regularized (Tikhonov) inverse problem solver. Produces smooth emission rate spectra.
+L2 method solving problem:
+$$\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \cdot \left|\left|\mathbf{F}\right|\right|_2^2 \right\}}$$
+
 
 **Interface:** Same as `L1`
 
@@ -585,6 +590,8 @@ L2-regularized (Tikhonov) inverse problem solver. Produces smooth emission rate 
 **`class OpenDLTS_DataHandler.LDLTS_Method.D2`**
 
 Second-derivative regularization (Contin-like). Produces very smooth emission rate spectra similar to the CONTIN algorithm.
+D2 method solving problem:
+$$\mathrm{\mathop{arg\ min}\limits_{\mathbf{F}}\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \cdot \left|\left|\frac{d\mathbf{F}}{dt}\right|\right|_2^2 \right\}}$$
 
 **Interface:** Same as `L1`
 
@@ -597,6 +604,17 @@ Second-derivative regularization (Contin-like). Produces very smooth emission ra
 **`class OpenDLTS_DataHandler.LDLTS_Method.SR`**
 
 Sparse representation solver using dictionary learning. Represents the emission rate spectrum as a combination of predefined basis functions (word functions).
+SR method solving problem:
+```math
+\begin{equation}\label{eq:proposed_method}
+\begin{aligned}
+\begin{matrix}
+    \mathrm{\mathop{arg\ min}\limits_{\mathbf{F},\ \mathbf{X}}}&\mathrm{\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \left|\left|\mathbf{R}\right|\right|_{1} \right\}}\\
+    \mathrm{s.t.}&\mathrm{\ \mathbf{F^*}=\mathbf{D}\times\mathbf{X}}
+\end{matrix}
+\end{aligned}
+\end{equation}
+```
 
 #### Additional Methods
 
@@ -641,6 +659,17 @@ Generate sparse dictionary for a single word function.
 **`class OpenDLTS_DataHandler.LDLTS_Method.SRL1`**
 
 Hybrid solver combining Sparse Representation with L1 regularization. Uses dictionary-based representation for the main spectrum with L1 regularization for residual features.
+SRL1 method solving problem:
+```math
+\begin{equation}\label{eq:proposed_method}
+\begin{aligned}
+\begin{matrix}
+    \mathrm{\mathop{arg\ min}\limits_{\mathbf{F},\ \mathbf{X}}}&\mathrm{\ \left\{ \left|\left|\mathbf{I}-\mathbf{A}\times\mathbf{F}\right|\right|_2^2 +\lambda \left|\left|\mathbf{F^{\#}}\right|\right|_{1} \right\}}\\
+    \mathrm{s.t.}&\mathrm{\ \mathbf{F^*}=\mathbf{D}\times\mathbf{X}}+\mathbf{F^{\#}}
+\end{matrix}
+\end{aligned}
+\end{equation}
+```
 
 **Interface:** Extends `SR` with additional L1 regularization on residual component.
 
@@ -684,67 +713,11 @@ arrh_plotter.display()
 
 ---
 
-## Examples
-
-### Basic DLTS Analysis Workflow
-
-```python
-from OpenDLTS_DataHandler import Data_Loader, DLTS_CORRELATION_FUNCTION, L1
-
-# 1. Load experimental data
-loader = Data_Loader('experimental_data.transdata')
-
-# 2. Generate traditional DLTS spectrum
-corr_func = DLTS_CORRELATION_FUNCTION.shifted_exponential()
-T_dlts, signal, rate_window = corr_func(loader.t, loader.T, loader.C)
-
-# 3. Perform LDLTS analysis
-ldlts = L1(loader, Ns=500, s0=1e-1, s1=1e5)
-ldlts.solve(Ti_list=np.arange(len(loader.T)), lambda1=1e-4)
-
-# 4. Optional: L-curve optimization for lambda1
-ldlts.lcurve(solve_arg={'Ti_list': np.arange(len(loader.T))})
-
-# 5. Save results
-ldlts.save_result('ldlts_result.npy')
-```
-
-### Simulated Data Generation
-
-```python
-from OpenDLTS_DataHandler import DLTS_Data_Generator, Trap
-
-# Define trap parameters
-trap1 = Trap(Ea=0.45, sigma=2e-15, material='Si', material_doping_type='N')
-trap2 = Trap(Ea=0.62, sigma=8e-14, material='Si', material_doping_type='N')
-
-# Create generator
-generator = DLTS_Data_Generator([trap1, trap2])
-
-# Generate synthetic data
-T_range = np.linspace(100, 500, 60)
-t_range = np.logspace(-6, -2, 300)
-data = generator.get_data(T_range, t_range, sigma=0.05, savefile='simulated.transdata')
-```
-
-### Material Property Analysis
-
-```python
-from OpenDLTS_DataHandler import Material
-
-# Silicon properties at different temperatures
-for T in [300, 350, 400, 450, 500]:
-    si = Material.Si(T=T)
-    print(f"T={T}K: Eg={si.Eg:.3f}eV, ni={si.ni:.2e}cm⁻³")
-```
-
----
-
 ## Dependencies
 
 - **Core:** `numpy`, `scipy`, `cvxpy`
 - **Visualization:** `ipywidgets`, `matplotlib`
-- **Solvers:** Requires at least one of: `GUROBI`, `MOSEK`, or `COPT` (commercial licenses)
+- **Solvers:** Requires at least one of: `GUROBI`, `MOSEK`, or `COPT` (need licenses)
 
 ## Citation
 
