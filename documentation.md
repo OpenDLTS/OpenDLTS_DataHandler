@@ -20,7 +20,6 @@
   - [SR (Sparse Representation)](#sparse-representation)
   - [SRL1 (SR + L1 Hybrid)](#srl1-hybrid)
 - [Widgets (Interactive Visualization)](#widgets)
-- [Examples](#examples)
 
 ---
 
@@ -697,13 +696,13 @@ Interactive visualization components based on `ipywidgets` for Jupyter notebooks
 | Widget | Description |
 |--------|-------------|
 | `Ti_List_Selector` | Interactive temperature index selector |
-| `Data_Viewer_Box` | Raw data viewer with zoom and pan |
-| `DLTS_Viewer_Box` | Traditional DLTS spectrum viewer |
+| `Data_Viewer_Box` | Transient data viewer and editor |
+| `DLTS_Viewer_Box` | DLTS spectrum viewer |
 | `LDLTS_Viewer_Box` | LDLTS result viewer |
 | `ARRH_PLOTTER` | Arrhenius plot generator |
 | `TRANS_PLOTTER` | Transient curve plotter |
-| `LDLTS_PLOTTER` | LDLTS spectrum plotter |
-| `LDLTS_T_PLOTTER` | Temperature-dependent LDLTS plotter |
+| `LDLTS_PLOTTER` | LDLTS spectrum (multi temperatures) plotter |
+| `LDLTS_T_PLOTTER` | LDLTS spectrum (specific temperature) plotter |
 
 ### Example Usage
 
