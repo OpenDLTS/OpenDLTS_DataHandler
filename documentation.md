@@ -752,6 +752,3 @@ If you use OpenDLTS_DataHandler in your research, please cite:
 
 > **DOI:** [10.1109/TPEL.2026.3666365](https://doi.org/10.1109/TPEL.2026.3666365)
 
----
-
-*Documentation generated for OpenDLTS_DataHandler. For more information, visit the project repository.*
