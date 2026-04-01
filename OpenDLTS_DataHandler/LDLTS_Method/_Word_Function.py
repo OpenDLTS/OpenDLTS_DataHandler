@@ -327,6 +327,74 @@ class Word_Function:
         # W_ndarray[:,1] is left blank, all 0
         # W_ndarray[:,2] sorting: according to the amplitude value of Ns when the amplitude is not zero at temperature T[0] + the amplitude value of Ns when the amplitude is not zero at temperature T[1].
         return W_ndarray,W_shape
+
+    @staticmethod
+    def get_dictionary_word_cover_arrh_sparse(Ns, T, s, Ti_list, Ea, word_index, upper_em, lower_em, T_num, upper_T=-1, lower_T=-1, T_power=2, manual_T_list=None,
+                                                B_sp_n=-1, B_sp_basis_i=-1, B_sp_degree=2):
+        if manual_T_list is None:
+            W_shape = (Ns*len(Ti_list),1)
+        else:
+            W_shape = (Ns*len(manual_T_list),1)
+        # Stores the non-zero value of W
+        W_row_val_tuple_list = []
+        # get ref_T0, ref_T1
+        if upper_T<=0 and lower_T>0:
+            ref_T0 = lower_T if lower_T < T[-1] else T[0]
+            ref_T1 = T[-1]
+        elif upper_T>0 and lower_T<=0:
+            ref_T0 = T[0]
+            ref_T1 = upper_T if upper_T > T[0] else T[-1]
+        elif upper_T>0 and lower_T>0:
+            if upper_T>lower_T:
+                ref_T0 = lower_T
+                ref_T1 = upper_T
+        else:
+            ref_T0 = T[0]
+            ref_T1 = T[-1]
+            
+        # Given upper_em, lower_em, ref_T0, ref_T1, Ea, get lower_x_arrh, lower_y_arrh, upper_x_arrh, upper_y_arrh
+        lower_x_arrh = 1/ref_T1/scipy.constants.k*scipy.constants.e
+        lower_y_arrh = -np.log(lower_em/ref_T1**T_power)
+        upper_x_arrh = 1/ref_T0/scipy.constants.k*scipy.constants.e
+        upper_y_arrh = -np.log(upper_em/ref_T0**T_power)
+
+        x_arrh = np.linspace(lower_x_arrh,upper_x_arrh,T_num)[word_index]
+        y_arrh = np.linspace(lower_y_arrh,upper_y_arrh,T_num)[word_index]
+        
+        if manual_T_list is None:
+            target_s_list = T[Ti_list]**T_power*np.exp(Ea*x_arrh-y_arrh)*np.exp(-Ea/T[Ti_list]/scipy.constants.k*scipy.constants.e)
+        else:
+            target_s_list = manual_T_list**T_power*np.exp(Ea*x_arrh-y_arrh)*np.exp(-Ea/manual_T_list/scipy.constants.k*scipy.constants.e)
+
+        # B_spline coeff.
+        B = Word_Function.get_B_spline_coeff_array(T_list = T[Ti_list], target_s_list = target_s_list, s = s, B_sp_n = B_sp_n,
+                                                   B_sp_basis_i = B_sp_basis_i, B_sp_degree = B_sp_degree)
+        for index,target_s in enumerate(target_s_list):
+            current_B = B[index]
+            current_T = T[Ti_list[index]]
+            current_start_idx = Ns * index
+            # Linear interpolation
+            temp_index_list,temp_val_list = Word_Function.emission_rate_array_interpolation(s=s, target_s=target_s)
+            for temp_i,temp_v in zip(temp_index_list,temp_val_list):
+                W_row_val_tuple_list.append((current_start_idx + temp_i, current_B * temp_v))
+        if W_row_val_tuple_list:
+            rows = []
+            vals = []
+            for (i, v) in W_row_val_tuple_list:
+                rows.append(i)
+                vals.append(v)
+            W_ndarray = np.zeros((len(rows),3))
+            W_ndarray[:,0] = np.array(rows)
+            W_ndarray[:,2] = np.array(vals)
+        else:
+            W_ndarray = None
+        # Return Tuple: (W_ndarray: np.ndarray, W_shape: Tuple)
+        # W_ndarray: shape=(*,3)
+        # W_ndarray[:,0] sorting: according to the index value of Ns when the amplitude is not zero at temperature T[0] + the index value of Ns when the amplitude is not zero at temperature T[1].
+        # W_ndarray[:,1] is left blank, all 0
+        # W_ndarray[:,2] sorting: according to the amplitude value of Ns when the amplitude is not zero at temperature T[0] + the amplitude value of Ns when the amplitude is not zero at temperature T[1].
+        return W_ndarray,W_shape
+    
     @staticmethod
     def get_dictionary_word_constant_emission_sparse(Ns, T, s, Ti_list, constant_emission_rate, manual_T_list=None,
                                                      B_sp_n=-1, B_sp_basis_i=-1, B_sp_degree=2):
