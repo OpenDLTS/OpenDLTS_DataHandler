@@ -112,6 +112,10 @@ class Data_Loader:
             data_x_type=self.data_x_type,
             condition_type=self.condition_type
         )
+        # Data sorted by temperature from smallest to largest
+        T_sorted_idx = np.argsort(self.T)
+        self.T = self.T[T_sorted_idx]
+        self.C = self.C[T_sorted_idx]
 
     def data_space(self, num: int, space: str = 'log', lin_interp: bool = False) -> 'Data_Loader':
         """
