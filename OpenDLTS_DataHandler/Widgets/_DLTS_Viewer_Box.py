@@ -16,47 +16,28 @@ import numpy as np
 import ipywidgets as widgets
 import threading
 import matplotlib.pyplot as plt
+import scipy.constants as sci_const
+import scipy.interpolate
+import scipy.signal
 from scipy.optimize import fsolve as sci_opt_fsolve
 from scipy.optimize import minimize_scalar as sci_opt_min_sca
+from ._ARRH_PLOTTER import ARRH_PLOTTER_2D
 from .._DLTS_CORRELATION_FUNCTION import DLTS_CORRELATION_FUNCTION
 from .._Data_Loader import Data_Loader
 from .._config import *
 
 # DLTS_Viewer_Box
 class DLTS_Viewer_Box:
-    """
-    Interactive widget container for DLTS data visualization and analysis.
-
-    Provides four operation modes:
-    - Fix t2/t1 ratio: Automatically computes t2 based on fixed ratio to t1
-    - Fix rate window: Solves for t2 that produces constant emission rate
-    - Manually: Full manual control of both t1 and t2
-    - Correlation function: Uses specialized DLTS correlation functions
-
-    Attributes:
-        parent: Parent object containing DLTS data
-        logger_name (str): Name for logging operations
-        logging_level (str): Verbosity level for logging
-        fig1 (Figure): Primary matplotlib figure object
-        plot_out_image1 (FigureCanvas): Canvas for embedded plot display
-
-    Args:
-        parent: Data container object with DLTS data arrays
-        logging_level: Verbosity level ('DEBUG', 'INFO', 'WARNING', etc.)
-    """
     def __init__(self, dlts_data: Data_Loader, show_ui: bool = True):
-        """
-        Initialize DLTS viewer box and UI components.
-
-        Args:
-            parent: Data container object with DLTS data arrays
-            logging_level: Verbosity level for logging system
-        """
         self.parent = dlts_data
         self.plot_dlts_lock = threading.Lock()
         self.plot_x = np.array([0])
         self.plot_y = np.array([0])
         self.plot_em = 0.0
+        
+        # 新增：用于存储已保存的 DLTS 谱图数据
+        self.saved_dlts_data = {}
+        
         self._create_ui()
         self._set_event()
         self.init_dlts_mode0()
@@ -65,17 +46,6 @@ class DLTS_Viewer_Box:
             display(self.box)
 
     def _create_ui(self):
-        """
-        Construct interactive widget interface components.
-        
-        Creates:
-        - Plot mode selector radio buttons
-        - Time constant ratio/rate window controls
-        - Temperature/time selectors with validation
-        - Correlation function dropdown and parameters
-        - Matplotlib figure with constrained layout
-        - Data export controls
-        """
         self.dlts_plot_mode = widgets.RadioButtons(
             options=['Fix t2/t1 ratio', 'Fix rate window', 'Manually', 'Correalation function'],
             description='DLTS Plot Mode:',
@@ -101,131 +71,151 @@ class DLTS_Viewer_Box:
         )
         self.log_box = widgets.Label('')
         self.t1 = widgets.IntSlider(
-            value=0,
-            min=0,
-            max=1000,
-            step=1,
-            description='Set t1:',
-            disabled=False,
-            continuous_update=True,
-            orientation='horizontal',
-            layout=widgets.Layout(width='90%'),
-            readout=False,
-            readout_format='d'
+            value=0, min=0, max=1000, step=1,
+            description='Set t1:', disabled=False,
+            continuous_update=True, orientation='horizontal',
+            layout=widgets.Layout(width='90%'), readout=False
         )
         self.t2 = widgets.IntSlider(
-            value=0,
-            min=0,
-            max=1000,
-            step=1,
-            description='Set t2:',
-            disabled=False,
-            continuous_update=True,
-            orientation='horizontal',
-            layout=widgets.Layout(width='90%'),
-            readout=False,
-            readout_format='d'
+            value=0, min=0, max=1000, step=1,
+            description='Set t2:', disabled=False,
+            continuous_update=True, orientation='horizontal',
+            layout=widgets.Layout(width='90%'), readout=False
         )
+        
         def get_class_method_names(cls):
             method_names = []
             for name, value in cls.__dict__.items():
                 if callable(value) or isinstance(value, (classmethod, staticmethod)):
                     method_names.append(name)
             return method_names
+            
         self.cf = widgets.Dropdown(
             options=get_class_method_names(DLTS_CORRELATION_FUNCTION),
             value=get_class_method_names(DLTS_CORRELATION_FUNCTION)[2],
-            description='Function:',
-            disabled=False,
+            description='Function:', disabled=False,
         )
         self.cf_tc0 = widgets.BoundedFloatText(
-            value=self.parent.t[0],
-            min=self.parent.t[0],
-            max=self.parent.t[-1],
-            disabled=False,
-            description='tc0:',
-            layout=widgets.Layout(width='10%'),
-            style={'description_width': 'initial'}
+            value=self.parent.t[0], min=self.parent.t[0], max=self.parent.t[-1],
+            description='tc0:', layout=widgets.Layout(width='10%'), style={'description_width': 'initial'}
         )
         self.cf_tc1 = widgets.BoundedFloatText(
-            value=self.parent.t[1],
-            min=self.parent.t[0],
-            max=self.parent.t[-1],
-            disabled=False,
-            description='tc1:',
-            layout=widgets.Layout(width='10%'),
-            style={'description_width': 'initial'}
+            value=self.parent.t[1], min=self.parent.t[0], max=self.parent.t[-1],
+            description='tc1:', layout=widgets.Layout(width='10%'), style={'description_width': 'initial'}
         )
         self.cf_target_em = widgets.BoundedFloatText(
-            value=100,
-            min=10,
-            max=1000,
-            disabled=False,
-            description='Target em:',
-            layout=widgets.Layout(width='10%'),
-            style={'description_width': 'initial'}
+            value=100, min=10, max=1000,
+            description='Target em:', layout=widgets.Layout(width='10%'), style={'description_width': 'initial'}
         )
         self.cf_target_em_btn = widgets.Button(
-            description='Find em',
-            disabled=False,
-            button_style='danger',
-            tooltip='Find target em by changing tc1',
-            icon='bullseye',
-            layout=widgets.Layout(width='8%')
+            description='Find em', button_style='danger', icon='bullseye', layout=widgets.Layout(width='8%')
         )
         self.cf_replot_btn = widgets.Button(
-            description='Replot',
-            disabled=False,
-            button_style='info',
-            tooltip='Replot',
-            icon='reply',
-            layout=widgets.Layout(width='7%')
+            description='Replot', button_style='info', icon='reply', layout=widgets.Layout(width='7%')
         )
-        self.cf_use_opt_tc0 = widgets.Checkbox(
-            value=True,
-            description='Use Opt. tc0',
-            disabled=False
-        )
-        #self.plot_out = widgets.Output()
+        self.cf_use_opt_tc0 = widgets.Checkbox(value=True, description='Use Opt. tc0')
+
         plt.ioff()
         self.fig1 = plt.figure(figsize = (12,3), layout='tight')
-        #self.fig1 = plt.figure(figsize = (12,2.5))
         self.fig1.canvas.header_visible = False
         self.fig1.canvas.resizable = False
         self.fig1.canvas.footer_visible = False
-        x=np.array([0])
-        y=np.array([0])
         self.ax1 = plt.gca()
         self.ax1.grid()
-        self.im1 = self.ax1.plot(x,y)
+        self.im1 = self.ax1.plot([0],[0])
         self.plot_out_image1 = self.fig1.canvas
         self.plot_out_image1.layout = widgets.Layout(width='1200px',height='300px')
         self.ax1.text(-0.01,0,'Plot DLTS spectra here', fontsize=20)
+        
         self.save_file_name = widgets.Text(
-            #value=f'{str(self.parent.original_data_file_name)}.em_{round(self.plot_em,2)}_dltsplot',
             value = self.parent.transient_data_full_path.with_suffix('.dltsplot').name,
-            placeholder='Output File Path',
-            disabled=False,
-            layout=widgets.Layout(width='40%')
+            placeholder='Output File Path', layout=widgets.Layout(width='40%')
         )
         self.save_file_btn = widgets.Button(
-            description='Save File',
-            disabled=False,
-            button_style='info',
-            tooltip='Save current plot data',
-            icon='file',
-            layout=widgets.Layout(width='10%')
+            description='Save File', button_style='info', icon='file', layout=widgets.Layout(width='10%')
         )
+        
+        # 新增按钮与列表
+        self.dlts_add_list_btn = widgets.Button(
+            description='Add to List', button_style='info', tooltip='Add current DLTS to List', layout=widgets.Layout(width='10%')
+        )
+        self.dlts_list_selector = widgets.SelectMultiple(
+            options=[], value=[], description='DLTS List', layout=widgets.Layout(width='95%')
+        )
+        self.dlts_del_list_btn = widgets.Button(
+            description='Delete data', button_style='danger', tooltip='Delete selected from List', layout=widgets.Layout(width='95%')
+        )
+        
+        # 新增：导出 List 数据与峰值的按钮与文本框
+        self.dlts_save_list_name = widgets.Text(
+            value='dlts_list_export.txt', placeholder='Export List Name', layout=widgets.Layout(width='95%')
+        )
+        self.dlts_save_list_btn = widgets.Button(
+            description='Export List & Peaks', button_style='success', icon='download', layout=widgets.Layout(width='95%')
+        )
+        
+        # 峰值提取参数
+        self.peak_or_valley = widgets.Select(
+            options=['peak', 'valley'], value='peak', description='extract type:', layout=widgets.Layout(width='95%')
+        )
+        # 【修改】将 IntSlider 修改为 FloatLogSlider
+        self.smoothing_factor = widgets.FloatLogSlider(
+            value=10, base=10, min=-2, max=4, step=0.1, description='Smoothing factor:',
+            continuous_update=False, orientation='horizontal', layout=widgets.Layout(width='70%'),
+            style={'description_width': 'initial'}
+        )
+        
+        self.fig2 = plt.figure(figsize = (10,3), layout='tight')
+        self.fig2.canvas.header_visible = False
+        self.fig2.canvas.resizable = False
+        self.fig2.canvas.footer_visible = False
+        self.ax2 = plt.gca()
+        self.ax2.grid()
+        self.plot_out_image2 = self.fig2.canvas
+        self.plot_out_image2.layout = widgets.Layout(width='1000px',height='300px')
+        self.ax2.text(-0.01,0,'Plot List here', fontsize=20)
+        
+        self.arrh_mat = widgets.Dropdown(
+            options=['SiC', 'Si', 'GaN'], value='SiC', description='Material:', layout=widgets.Layout(width='15%'), style={'description_width': 'initial'}
+        )
+        self.arrh_doping_type = widgets.Dropdown(
+            options=['N', 'P'], value='N', description='Doping Type:', layout=widgets.Layout(width='15%'), style={'description_width': 'initial'}
+        )
+        self.arrh_widget = widgets.VBox()
+        self.arrh_wwidget = widgets.VBox([self.arrh_widget])
+
+        # -------------------------------------
+        # 组装 UI
+        # -------------------------------------
+        row1 = widgets.HBox([self.dlts_plot_mode, widgets.VBox([widgets.HBox([self.t2t1_ratio, self.rate_window]), self.t1, self.t2,],layout=widgets.Layout(width='70%'))])
+        row2 = widgets.HBox([self.cf, self.cf_use_opt_tc0, self.cf_tc0, self.cf_tc1, self.cf_target_em, self.cf_target_em_btn, self.cf_replot_btn])
+        row_file = widgets.HBox([self.save_file_name, self.save_file_btn, self.dlts_add_list_btn])
+        
+        # 将新增加的导出功能加入到左侧的控件列中
+        list_controls = widgets.VBox([
+            self.dlts_list_selector, 
+            self.dlts_del_list_btn, 
+            self.peak_or_valley,
+            widgets.HTML("<hr>"), # 分隔线让 UI 更好看点
+            self.dlts_save_list_name,
+            self.dlts_save_list_btn
+        ], layout=widgets.Layout(width='20%'))
+        
+        fig2_controls = widgets.HBox([self.smoothing_factor])
+        fig2_area = widgets.VBox([fig2_controls, self.plot_out_image2], layout=widgets.Layout(width='80%'))
+        row_list_fig2 = widgets.HBox([list_controls, fig2_area])
+        
+        row_arrh = widgets.HBox([self.arrh_mat, self.arrh_doping_type])
+        arrh_area = widgets.VBox([row_arrh, self.arrh_wwidget])
+
         self.box = widgets.VBox([
-            widgets.HBox([self.dlts_plot_mode, widgets.VBox([widgets.HBox([self.t2t1_ratio, self.rate_window]), self.t1, self.t2,],layout=widgets.Layout(width='70%'))]),
-            widgets.HBox([self.cf, self.cf_use_opt_tc0, self.cf_tc0, self.cf_tc1, self.cf_target_em, self.cf_target_em_btn, self.cf_replot_btn]),
-            self.log_box,
-            #self.plot_out,
-            self.plot_out_image1,
-            widgets.HBox([self.save_file_name, self.save_file_btn])
+            row1, row2, self.log_box, self.plot_out_image1,
+            row_file, 
+            row_list_fig2, 
+            arrh_area
         ])
+
     def _set_event(self):
-        """Register event handlers for all interactive widgets."""
         self.dlts_plot_mode.observe(self._observe_dlts_plot_mode, names='value')
         self.t2t1_ratio.observe(self._observe_t2t1_ratio, names='value')
         self.rate_window.observe(self._observe_rate_window, names='value')
@@ -239,15 +229,182 @@ class DLTS_Viewer_Box:
         self.cf_target_em_btn.on_click(self._click_cf_target_em_btn)
         self.cf_replot_btn.on_click(self._click_cf_replot_btn)
         
+        # 列表与峰值提取控件的事件绑定
+        self.dlts_add_list_btn.on_click(self._click_add_list_btn)
+        self.dlts_del_list_btn.on_click(self._click_del_list_btn)
+        self.dlts_save_list_btn.on_click(self._click_save_list_btn) # 新增的导出事件
+        self.smoothing_factor.observe(self._observe_peak_extraction_params, names='value')
+        self.peak_or_valley.observe(self._observe_peak_extraction_params, names='value')
+        self.arrh_mat.observe(self._observe_peak_extraction_params, names='value')
+        self.arrh_doping_type.observe(self._observe_peak_extraction_params, names='value')
+
+    # ==========================================
+    # List 和 Peak Extraction 的联动逻辑与导出
+    # ==========================================
+    def _click_add_list_btn(self, b):
+        if len(self.plot_x) <= 1:
+            self.log_box.value = "No valid DLTS data to add."
+            return
+        
+        base_label = f"em={self.plot_em:.2f} s^-1"
+        label = base_label
+        count = 1
+        while label in self.saved_dlts_data:
+            label = f"{base_label} ({count})"
+            count += 1
+            
+        factor = 1.0
+        if hasattr(self.parent, 'data_plot_dict') and 'C_plot_factor' in self.parent.data_plot_dict:
+            factor = self.parent.data_plot_dict['C_plot_factor']
+            
+        self.saved_dlts_data[label] = {
+            'x': self.plot_x.copy(),
+            'y': self.plot_y.copy() * factor,
+            'em': self.plot_em,
+            'pkx': [], # 预留位置保存峰值坐标
+            'pky': []
+        }
+        self.dlts_list_selector.options = list(self.saved_dlts_data.keys())
+        self._update_list_and_arrh_plot()
+
+    def _click_del_list_btn(self, b):
+        if not self.dlts_list_selector.value:
+            return
+        for item in self.dlts_list_selector.value:
+            if item in self.saved_dlts_data:
+                del self.saved_dlts_data[item]
+        self.dlts_list_selector.options = list(self.saved_dlts_data.keys())
+        self._update_list_and_arrh_plot()
+
+    def _click_save_list_btn(self, b):
+        """新增：将 List 中的所有谱图数据和对应提取出的峰值保存到文本文件中"""
+        if not self.saved_dlts_data:
+            self.log_box.value = "List is empty, nothing to export."
+            return
+            
+        try:
+            save_path = self.parent.transient_data_full_path.parent / self.dlts_save_list_name.value
+            with open(save_path, 'w', encoding='utf-8') as f:
+                for label, data in self.saved_dlts_data.items():
+                    f.write(f"--- Curve: {label} ---\n")
+                    f.write(f"Emission Rate: {data['em']:.4e} s^-1\n\n")
+                    
+                    f.write(">>> Extracted Peaks (Temperature [K], DLTS Signal):\n")
+                    pkx_list = data.get('pkx', [])
+                    pky_list = data.get('pky', [])
+                    if len(pkx_list) == 0:
+                        f.write("None\n")
+                    else:
+                        for px, py in zip(pkx_list, pky_list):
+                            f.write(f"{px:.4f}\t{py:.6e}\n")
+                    
+                    f.write("\n>>> Raw Data (Temperature [K], DLTS Signal):\n")
+                    for dx, dy in zip(data['x'], data['y']):
+                        f.write(f"{dx:.4f}\t{dy:.6e}\n")
+                    f.write("\n" + "="*40 + "\n\n")
+                    
+            self.log_box.value = f"Successfully exported to: {self.dlts_save_list_name.value}"
+        except Exception as e:
+            self.log_box.value = f"Export failed: {str(e)}"
+
+    def _observe_peak_extraction_params(self, change):
+        self._update_list_and_arrh_plot()
+
+    def _update_list_and_arrh_plot(self):
+        # 1. 清理 ax2
+        self.ax2.clear()
+        self.ax2.grid(True)
+        if hasattr(self.parent, 'data_plot_dict'):
+            self.ax2.set_xlabel(self.parent.data_plot_dict.get('T_label', r'$Temperature\ (K)$'), fontsize=14)
+            self.ax2.set_ylabel(self.parent.data_plot_dict.get('DLTS_label', r'$DLTS\ signal\ (a.u.)$'), fontsize=14)
+
+        if not self.saved_dlts_data:
+            self.plot_out_image2.draw()
+            self.plot_out_image2.flush_events()
+            self.arrh_widget.children = []
+            return
+
+        arrh_x = []
+        arrh_y = []
+        arrh_c = []
+        
+        lam = self.smoothing_factor.value
+        is_peak = (self.peak_or_valley.value == 'peak')
+
+        # 2. 绘制 Spline 和 Peaks
+        cmap = plt.colormaps.get_cmap('tab10')
+        
+        for label, data in self.saved_dlts_data.items():
+            x = data['x']
+            y = data['y']
+            emi = data['em']
+            
+            self.ax2.plot(x, y, label=label)
+            
+            # 清空旧的峰值坐标记录，以便下方写入最新的值
+            self.saved_dlts_data[label]['pkx'] = []
+            self.saved_dlts_data[label]['pky'] = []
+            
+            if len(x) < 4:
+                continue
+            
+            try:
+                spl = scipy.interpolate.make_smoothing_spline(x, y, lam=lam)
+                xs = np.linspace(x[0], x[-1], 1000)
+                ys = spl(xs)
+                
+                # 寻找峰值
+                pi, _ = scipy.signal.find_peaks(ys if is_peak else -ys)
+                pkx = xs[pi]
+                pky = ys[pi]
+                
+                # 保存峰值，供导出功能使用
+                self.saved_dlts_data[label]['pkx'] = pkx
+                self.saved_dlts_data[label]['pky'] = pky
+                
+                c_array = [cmap(i % 10) for i in range(len(pkx))]
+                self.ax2.scatter(pkx, pky, color=c_array, marker='o', zorder=3)
+                
+                # 提取 Arrhenius 数据
+                for i in range(len(pkx)):
+                    pkxi = pkx[i]
+                    x_arrh = 1 / sci_const.k / pkxi * sci_const.e
+                    y_arrh = -np.log(emi / (pkxi**2))
+                    
+                    arrh_x.append(x_arrh)
+                    arrh_y.append(y_arrh)
+                    arrh_c.append(i)
+                    
+            except Exception as e:
+                self.logger.warning(f"Failed to fit spline for {label}: {e}")
+                pass
+
+        self.ax2.legend(loc='lower right')
+        self.plot_out_image2.draw()
+        self.plot_out_image2.flush_events()
+
+        # 3. 渲染 Arrhenius Plot
+        self.arrh_widget.children = []
+        if len(arrh_x) > 0:
+            plt.ioff()
+            self.arrh_plotter_instance = ARRH_PLOTTER_2D(
+                x=np.array(arrh_x),
+                y=np.array(arrh_y),
+                c=np.array(arrh_c),
+                material=self.arrh_mat.value,
+                dopant_species=self.arrh_doping_type.value,
+                figsize=(12, 6) 
+            )
+            
+            self.arrh_widget.close()
+            self.arrh_widget = widgets.VBox()
+            self.arrh_wwidget.children = [self.arrh_widget]
+            self.arrh_widget.children = [self.arrh_plotter_instance.fig.canvas]
+
+    # ==========================================
+    # 原有逻辑保留区
+    # ==========================================
     def _observe_dlts_plot_mode(self, change):
-        """
-        Handle plot mode selection changes.
-        
-        Routes to appropriate initialization method based on selected mode.
-        
-        Args:
-            change: Widget change event object
-        """
         if self.dlts_plot_mode.value == 'Fix t2/t1 ratio':
             self.init_dlts_mode0()
         elif self.dlts_plot_mode.value == 'Fix rate window':
@@ -256,122 +413,47 @@ class DLTS_Viewer_Box:
             self.init_dlts_mode2()
         elif self.dlts_plot_mode.value == 'Correalation function':
             self.init_dlts_mode3()
+
     def _observe_t2t1_ratio(self, change):
-        """
-        Handle changes to t2/t1 ratio parameter.
-        
-        Triggers recalculation and plotting for fixed t2/t1 mode.
-        
-        Args:
-            change: Widget change event object
-        """
         self.plot_dlts_fix_t2t1_ratio()
+
     def _observe_rate_window(self, change):
-        """
-        Handle changes to rate window parameter.
-        
-        Triggers recalculation and plotting for fixed rate window mode.
-        
-        Args:
-            change: Widget change event object
-        """
         self.plot_dlts_fix_rate_window()
+
     def _observe_t1(self, change):
-        """
-        Handle manual t1 slider changes.
-        
-        Routes recalculation to appropriate mode (ratio, rate window, or manual).
-        
-        Args:
-            change: Widget change event object
-        """
         if self.dlts_plot_mode.value == 'Fix t2/t1 ratio':
             self.plot_dlts_fix_t2t1_ratio()
         elif self.dlts_plot_mode.value == 'Fix rate window':
             self.plot_dlts_fix_rate_window()
         elif self.dlts_plot_mode.value == 'Manually':
             self.plot_dlts_manually()
+
     def _observe_t2(self, change):
-        """
-        Handle manual t2 slider changes.
-        
-        Triggers manual mode recalculation when applicable.
-        
-        Args:
-            change: Widget change event object
-        """
-        if self.dlts_plot_mode.value == 'Fix t2/t1 ratio':
-            pass
-        elif self.dlts_plot_mode.value == 'Fix rate window':
-            pass
-        elif self.dlts_plot_mode.value == 'Manually':
+        if self.dlts_plot_mode.value == 'Manually':
             self.plot_dlts_manually()
+
     def _observe_cf(self, change):
-        """
-        Handle correlation function selection changes.
-        
-        Triggers replotting with selected correlation function.
-        
-        Args:
-            change: Widget change event object
-        """
         self.plot_dlts_cf()
         self._update_cf_target_em_max_min()
+
     def _observe_cf_use_opt_tc0(self, change):
-        """
-        Handle optimized tc0 checkbox changes.
-        
-        Enables/disables tc0 input based on checkbox state.
-        
-        Args:
-            change: Widget change event object
-        """
         if self.cf_use_opt_tc0.value:
             self.cf_tc0.disabled = True
         else:
             self.cf_tc0.disabled = False
         self.plot_dlts_cf()
+
     def _observe_cf_tc0(self, change):
-        """
-        Handle tc0 parameter changes.
-        
-        Triggers correlation function replotting.
-        
-        Args:
-            change: Widget change event object
-        """
         self.plot_dlts_cf()
+
     def _observe_cf_tc1(self, change):
-        """
-        Handle tc1 parameter changes.
-        
-        Triggers correlation function replotting.
-        
-        Args:
-            change: Widget change event object
-        """
         self.plot_dlts_cf()
+
     def _click_save_file_btn(self, b):
-        """
-        Handle data export button click.
-        
-        Saves current plot data to text file using numpy.savetxt.
-        
-        Args:
-            b: Button click event object
-        """
         data_need_save = np.concatenate((self.plot_x.reshape(-1,1),self.plot_y.reshape(-1,1)),axis=1)
-        #np.savetxt(f'{self.parent.original_data_file_path}{self.save_file_name.value}', data_need_save,fmt='%s',delimiter='\t')
         np.savetxt(self.parent.transient_data_full_path.parent / self.save_file_name.value, data_need_save, fmt='%s',delimiter='\t')
+
     def init_dlts_mode0(self):
-        """
-        Initialize UI for 'Fix t2/t1 ratio' mode.
-        
-        Configures:
-        - Enables t1 control and ratio input
-        - Disables t2 control and correlation parameters
-        - Sets slider boundaries
-        """
         self.t1.value = 0
         self.t1.min = 0
         self.t1.max = len(self.parent.t)-1
@@ -385,15 +467,8 @@ class DLTS_Viewer_Box:
         self.t2.disabled = True
         self.t2t1_ratio.disabled = False
         self.rate_window.disabled = True
+
     def init_dlts_mode1(self):
-        """
-        Initialize UI for 'Fix rate window' mode.
-        
-        Configures:
-        - Enables t1 control and rate window input
-        - Disables t2 control and correlation parameters
-        - Sets slider boundaries
-        """
         self.t1.value = 0
         self.t1.min = 0
         self.t1.max = len(self.parent.t)-1
@@ -407,15 +482,8 @@ class DLTS_Viewer_Box:
         self.t2.disabled = True
         self.t2t1_ratio.disabled = True
         self.rate_window.disabled = False
+
     def init_dlts_mode2(self):
-        """
-        Initialize UI for manual mode.
-        
-        Configures:
-        - Enables both t1 and t2 controls
-        - Disables ratio/rate window and correlation parameters
-        - Sets slider boundaries
-        """
         self.t1.value = 0
         self.t1.min = 0
         self.t1.max = len(self.parent.t)-1
@@ -432,16 +500,8 @@ class DLTS_Viewer_Box:
         self.t2.disabled = False
         self.t2t1_ratio.disabled = True
         self.rate_window.disabled = True
+
     def init_dlts_mode3(self):
-        """
-        Initialize UI for correlation function mode.
-        
-        Configures:
-        - Disables time selectors
-        - Enables correlation function parameters
-        - Initializes time constants to valid ranges
-        - Configures optimized tc0 state
-        """
         self.t1.value = 0
         self.t1.min = 0
         self.t1.max = len(self.parent.t)-1
@@ -468,6 +528,7 @@ class DLTS_Viewer_Box:
         self.t2.disabled = True
         self.t2t1_ratio.disabled = True
         self.rate_window.disabled = True
+
     def _update_cf_target_em_max_min(self):
         dlts_cf = getattr(DLTS_CORRELATION_FUNCTION, self.cf.value)()
         max_tc1 = self.parent.t[-1]
@@ -480,28 +541,28 @@ class DLTS_Viewer_Box:
         rw_max = rw_max[0]
         self.cf_target_em.min = rw_min
         self.cf_target_em.max = rw_max
+
     def _click_cf_replot_btn(self, b):
         self.plot_dlts_cf()
+
     def _click_cf_target_em_btn(self, b):
         with self.plot_dlts_lock:
             self.plot_dlts_thread = threading.Thread(
                 target=self._click_cf_target_em_btn_thread_fun
             )
             self.plot_dlts_thread.start()
+
     def _click_cf_target_em_btn_thread_fun(self):
         dlts_cf = getattr(DLTS_CORRELATION_FUNCTION, self.cf.value)()
         def objective(tc1):
             _,_,temp_rw = dlts_cf(self.parent.t, self.parent.T, self.parent.C, use_opt_ratio=self.cf_use_opt_tc0.value, tc0=-1, tc1=tc1)
             return (self.cf_target_em.value -temp_rw[0])**2
         result = sci_opt_min_sca(
-            objective,
-            bounds=(self.cf_tc1.min, self.cf_tc1.max),
-            method='bounded'
+            objective, bounds=(self.cf_tc1.min, self.cf_tc1.max), method='bounded'
         )
         if not result.success:
             self.log_box.value = f"Can't find tc1 when em={self.cf_target_em.value:.1f} $s^{{-1}}$"
         else:
-            # plot
             for texti in self.ax1.texts:
                 texti.remove()
             self.log_box.value = ''
@@ -530,27 +591,13 @@ class DLTS_Viewer_Box:
                 self.log_box.value = f'{self.cf.value}(order={dlts_cf.order}). Current tc0={f_tc0}(Calculated from opt. td/tc ratio={dlts_cf.optimum_td_tc_ratio}), tc1={f_tc1}'
             else:
                 self.log_box.value = f'{self.cf.value}(order={dlts_cf.order}). Current tc0={f_tc0}, tc1={f_tc1}'
+
     def plot_dlts_cf(self):
-        """
-        Launch thread for correlation function plotting.
-        
-        Uses threading lock to prevent concurrent plot operations.
-        """
         with self.plot_dlts_lock:
-            self.plot_dlts_thread = threading.Thread(
-                target=self.plot_dlts_cf_thread_fun
-            )
+            self.plot_dlts_thread = threading.Thread(target=self.plot_dlts_cf_thread_fun)
             self.plot_dlts_thread.start()
+
     def plot_dlts_cf_thread_fun(self):
-        """
-        Worker function for correlation function plotting.
-        
-        Core operations:
-        - Validates time constant parameters
-        - Calculates DLTS response using selected function
-        - Updates plot with emission rate information
-        - Manages logging and error messages
-        """
         for texti in self.ax1.texts:
             texti.remove()
         self.log_box.value = ''
@@ -589,26 +636,11 @@ class DLTS_Viewer_Box:
                     self.log_box.value = f'{self.cf.value}(order={dlts_cf.order}). Current tc0={f_tc0}, tc1={f_tc1}'
 
     def plot_dlts_manually(self):
-        """
-        Launch thread for manual mode plotting.
-        
-        Uses threading lock to prevent concurrent plot operations.
-        """
         with self.plot_dlts_lock:
-            self.plot_dlts_thread = threading.Thread(
-                target=self.plot_dlts_manually_thread_fun
-            )
+            self.plot_dlts_thread = threading.Thread(target=self.plot_dlts_manually_thread_fun)
             self.plot_dlts_thread.start()
+
     def plot_dlts_manually_thread_fun(self):
-        """
-        Worker function for manual mode plotting.
-        
-        Core operations:
-        - Validates t1 < t2
-        - Computes ΔC = C(t2) - C(t1)
-        - Calculates emission rate from time points
-        - Updates plot and filename fields
-        """
         self.log_box.value = ''
         t1i = self.t1.value
         t2i = self.t2.value
@@ -637,27 +669,11 @@ class DLTS_Viewer_Box:
             self.log_box.value = 'Should be t1<t2'
         
     def plot_dlts_fix_t2t1_ratio(self):
-        """
-        Launch thread for fixed t2/t1 ratio plotting.
-        
-        Uses threading lock to prevent concurrent plot operations.
-        """
         with self.plot_dlts_lock:
-            self.plot_dlts_thread = threading.Thread(
-                target=self.plot_dlts_fix_t2t1_ratio_thread_fun
-            )
+            self.plot_dlts_thread = threading.Thread(target=self.plot_dlts_fix_t2t1_ratio_thread_fun)
             self.plot_dlts_thread.start()
+
     def plot_dlts_fix_t2t1_ratio_thread_fun(self):
-        """
-        Worker function for fixed t2/t1 ratio plotting.
-        
-        Core operations:
-        - Validates t2 within data range
-        - Interpolates C(t2) at calculated time
-        - Computes ΔC = C(t2) - C(t1)
-        - Calculates emission rate from ratio
-        - Updates plot and filename fields
-        """
         self.log_box.value = ''
         t1i = self.t1.value
         C1 = self.parent.C[:,t1i].reshape(-1)
@@ -670,7 +686,6 @@ class DLTS_Viewer_Box:
             for i in range(len(C2)):
                 C2[i] = np.interp(t2, self.parent.t, self.parent.C[i,:].reshape(-1))
             DelC = C2-C1
-            #DelCC = DelC/np.average(self.parent.C, axis=1)
             self.plot_x = self.parent.T
             self.plot_y = DelC
             self.plot_em = np.log(self.t2t1_ratio.value)/((self.t2t1_ratio.value-1)*self.parent.t[t1i])
@@ -686,28 +701,13 @@ class DLTS_Viewer_Box:
             self.ax1.autoscale_view()
             self.plot_out_image1.draw()
             self.plot_out_image1.flush_events()
+
     def plot_dlts_fix_rate_window(self):
-        """
-        Launch thread for fixed rate window plotting.
-        
-        Uses threading lock to prevent concurrent plot operations.
-        """
         with self.plot_dlts_lock:
-            self.plot_dlts_thread = threading.Thread(
-                target=self.plot_dlts_fix_rate_window_thread_fun
-            )
+            self.plot_dlts_thread = threading.Thread(target=self.plot_dlts_fix_rate_window_thread_fun)
             self.plot_dlts_thread.start()
+
     def plot_dlts_fix_rate_window_thread_fun(self):
-        """
-        Worker function for fixed rate window plotting.
-        
-        Core operations:
-        - Solves for t2 using root-finding algorithm
-        - Validates t2 within data range
-        - Interpolates C(t2) at calculated time
-        - Computes ΔC = C(t2) - C(t1)
-        - Updates plot and filename fields
-        """
         self.log_box.value = ''
         t1i = self.t1.value
         C1 = self.parent.C[:,t1i].reshape(-1)
@@ -719,7 +719,6 @@ class DLTS_Viewer_Box:
             root = sci_opt_fsolve(tempfunc, self.parent.t[-1])
         except Exception as e:
             return 0
-            self.log_box.value = f'Solve Failed:{str(e)}'
         t2 = root[0]
         if t2>self.parent.t[-1]:
             self.log_box.value = 'Solved t2 too big!'
@@ -727,7 +726,6 @@ class DLTS_Viewer_Box:
             for i in range(len(C2)):
                 C2[i] = np.interp(t2, self.parent.t, self.parent.C[i,:].reshape(-1))
             DelC = C2-C1
-            #DelCC = DelC/np.average(self.parent.C, axis=1)
             self.plot_x = self.parent.T
             self.plot_y = DelC
             self.plot_em = np.log(t2/t1)/(t2-t1)

@@ -1,4 +1,4 @@
-__all__ = ["ARRH_PLOTTER"]
+__all__ = ["ARRH_PLOTTER","ARRH_PLOTTER_2D"]
 
 from .._Material import Material
 from .._Trap import Trap
@@ -558,3 +558,277 @@ class ARRH_PLOTTER:
             self._fit_and_draw_line()
         except Exception as e:
             print(f"Error loading selected points: {e}")
+
+
+import matplotlib.lines as mlines
+class ARRH_PLOTTER_2D(ARRH_PLOTTER):
+    """
+    分类交互式阿伦尼乌斯图拟合器。
+    继承自 ARRH_PLOTTER，处理离散分类并完美处理生命周期冲突。
+    """
+    def __init__(self, x: np.ndarray, y: np.ndarray, c: np.ndarray, **kwargs):
+        # 强制允许所有标签通过过滤，并使用线性缩放以绕过对数报错
+        kwargs['c_polarity'] = 'both'
+        kwargs['colorbar_scale'] = 'linear'
+        
+        # 提前计算好颜色索引，供后续使用
+        self.unique_labels = np.unique(c)
+        self.label_to_color_idx = {label: idx % 10 for idx, label in enumerate(self.unique_labels)}
+        self.c_color_idx = np.array([self.label_to_color_idx[val] for val in c])
+        
+        # 执行父类初始化 (此时父类内部调用的 _update_layers 会被我们底下的 if 拦截掉)
+        super().__init__(x, y, c, **kwargs)
+
+        # 1. 移除父类生成的连续 Colorbar
+        if hasattr(self, 'colorbar') and self.colorbar is not None:
+            self.colorbar.remove()
+            self.colorbar = None
+
+        # 2. 建立离散的分类颜色映射 (Categorical Colormap)
+        self.cmap = plt.colormaps.get_cmap('tab10')
+        self.norm = colors.Normalize(vmin=0, vmax=9)
+
+        # 重新应用离散颜色映射到散点图
+        self.grouped_scatter.set_cmap(self.cmap)
+        self.grouped_scatter.set_norm(self.norm)
+        self.unselected_scatter.set_cmap(self.cmap)
+        self.unselected_scatter.set_norm(self.norm)
+        self.selected_scatter.set_cmap(self.cmap)
+        self.selected_scatter.set_norm(self.norm)
+
+        # 3. 添加分类图例 (Category Legend)
+        self._add_discrete_legend()
+
+        # 4. 子类属性全部就绪，手动触发完整的图层刷新！
+        self._subclass_ready = True 
+        self._update_layers(force_full_update=True)
+
+    def _add_discrete_legend(self):
+        """添加一个静态图例来表示不同的峰值分类，并放置在图表右侧外部填补空白"""
+        handles = []
+        for label in self.unique_labels:
+            idx = self.label_to_color_idx[label]
+            color = self.cmap(self.norm(idx))
+            handles.append(mlines.Line2D([], [], color=color, marker='o', linestyle='None', 
+                                         markersize=8, label=f'Peak {int(label)}'))
+        
+        # 【修改这里】：利用 bbox_to_anchor 将图例移出主绘图区，放到坐标轴右侧
+        self.category_legend = self.ax.legend(
+            handles=handles, 
+            title="Categories", 
+            loc='center left',            # 图例的左侧对齐
+            bbox_to_anchor=(1.02, 0.5),   # X坐标1.02（图表外部），Y坐标0.5（垂直居中）
+            borderaxespad=0.
+        )
+        self.ax.add_artist(self.category_legend)
+        
+        # 强制刷新一下画布的排版引擎，确保留白被完美利用
+        self.fig.canvas.draw_idle()
+        
+    def _update_layers(self, force_full_update=False):
+        """重写图层更新，使用分类颜色索引"""
+        # 【核心修复】：如果子类还没有完全准备好（处于 super().__init__ 阶段），直接跳过
+        if not getattr(self, '_subclass_ready', False):
+            return
+
+        all_indices = np.arange(len(self.x))
+        grouped_mask = np.isin(all_indices, list(self.grouped_points))
+        
+        needs_update = force_full_update
+        needs_update |= not np.array_equal(self.selected_mask, self.last_update_mask)
+        needs_update |= not np.array_equal(grouped_mask, self.last_grouped_mask)
+        
+        if not needs_update:
+            return
+
+        ungrouped_mask = ~grouped_mask
+        selected_mask = np.isin(all_indices, list(self.selected))
+        unsel_ungrouped_mask = ungrouped_mask & ~selected_mask
+
+        if force_full_update:
+            self.grouped_scatter.set_offsets(np.empty((0, 2)))
+            self.unselected_scatter.set_offsets(np.empty((0, 2)))
+            self.selected_scatter.set_offsets(np.empty((0, 2)))
+
+        if np.any(grouped_mask):
+            grouped_points = np.column_stack((self.x[grouped_mask], self.y[grouped_mask]))
+            self.grouped_scatter.set_offsets(grouped_points)
+            self.grouped_scatter.set_array(self.c_color_idx[grouped_mask]) 
+        else:
+            self.grouped_scatter.set_offsets(np.empty((0, 2)))
+
+        self.last_grouped_mask = grouped_mask
+
+        sel_points = np.column_stack((self.x[selected_mask], self.y[selected_mask]))
+        self.selected_scatter.set_offsets(sel_points)
+        self.selected_scatter.set_array(self.c_color_idx[selected_mask]) 
+
+        unselected_points = np.column_stack((self.x[unsel_ungrouped_mask], self.y[unsel_ungrouped_mask]))
+        self.unselected_scatter.set_offsets(unselected_points)
+        self.unselected_scatter.set_array(self.c_color_idx[unsel_ungrouped_mask]) 
+
+        self.last_update_mask = self.selected_mask.copy()
+        self.fig.canvas.draw_idle()
+
+    def _fit_and_draw_line(self):
+        """算术平均线性拟合"""
+        if self.temp_line_artist:
+            self.temp_line_artist.remove()
+            self.temp_line_artist = None
+            self.temp_line_labels = None
+            
+        if not self.selected:
+            return
+            
+        indices = list(self.selected)
+        x_sel = self.x[indices]
+        y_sel = self.y[indices]
+        c_sel = self.c[indices] 
+
+        unique_x = np.unique(x_sel)
+        y_fit = []
+        
+        for x_val in unique_x:
+            mask = x_sel == x_val
+            group_y = y_sel[mask]
+            y_fit.append(np.mean(group_y)) 
+            
+        if len(unique_x) < 2:
+            return
+            
+        try:
+            coeffs = np.polyfit(unique_x, y_fit, 1)
+        except np.linalg.LinAlgError:
+            return
+            
+        a, b = coeffs
+        
+        values, counts = np.unique(c_sel, return_counts=True)
+        dominant_label = values[np.argmax(counts)]
+        idx = self.label_to_color_idx[dominant_label]
+        color = self.cmap(self.norm(idx))
+
+        x_min, x_max = self.fixed_xlim
+        x_line = np.linspace(x_min, x_max, 100)
+        y_line = a * x_line + b
+
+        activation_energy = a
+        cross_section = None
+        
+        try:
+            if hasattr(self, 'mat') and self.mat is not None:
+                if self.dopant_species == 'N':
+                    cross_section = np.exp(-b) * self.mat.T**2 / self.mat.Nc / self.mat.vth_n
+                elif self.dopant_species == 'P':
+                    cross_section = np.exp(-b) * self.mat.T**2 / self.mat.Nv / self.mat.vth_p
+        except AttributeError:
+            pass
+
+        self.temp_line_artist, = self.ax.plot(x_line, y_line, color=color, lw=self.line_lw)
+        
+        if cross_section is not None:
+            label = fr"$E_a={activation_energy:.3f}eV$"+'\n'+ fr"$\sigma={cross_section:.2e}cm^2$"
+        else:
+            label = fr"$E_a={activation_energy:.3f}eV$"
+            
+        self.temp_line_labels = label
+        self._update_line_legend()
+        self.ax.set_xlim(self.fixed_xlim)
+        self.ax.set_ylim(self.fixed_ylim)
+
+    def get_group(self):
+        """保存算术平均拟合数据"""
+        if not self.selected:
+            print("No points selected to form a group.")
+            return
+            
+        try:
+            valid_indices = [i for i in self.selected if i < len(self.x)]
+            if not valid_indices:
+                return
+                
+            indices = list(valid_indices)
+            x_sel = self.x[indices]
+            y_sel = self.y[indices]
+            c_sel = self.c[indices]
+
+            group_dict = {}
+            for i in range(len(x_sel)):
+                x_val = x_sel[i]
+                if x_val not in group_dict:
+                    group_dict[x_val] = []
+                group_dict[x_val].append(y_sel[i])
+
+            if len(group_dict) < 2:
+                print("Insufficient distinct x-values for fitting (need at least 2)")
+                return
+
+            x_fit = []
+            y_fit = []
+            for key, y_vals in group_dict.items():
+                y_fit.append(np.mean(y_vals))
+                x_fit.append(key)
+
+            try:
+                coeffs = np.polyfit(x_fit, y_fit, 1)
+            except np.linalg.LinAlgError as e:
+                print(f"Linear fit error: {e}")
+                return
+                
+            a, b = coeffs
+            
+            values, counts = np.unique(c_sel, return_counts=True)
+            dominant_label = values[np.argmax(counts)]
+            idx = self.label_to_color_idx[dominant_label]
+            color = self.cmap(self.norm(idx))
+
+            x_min, x_max = self.fixed_xlim
+            x_line = np.linspace(x_min, x_max, 100)
+            y_line = a * x_line + b
+            activation_energy = a
+            cross_section = None
+            
+            if hasattr(self, 'mat') and self.mat is not None:
+                if self.dopant_species == 'N':
+                    cross_section = np.exp(-b) * self.mat.T**2 / self.mat.Nc / self.mat.vth_n
+                elif self.dopant_species == 'P':
+                    cross_section = np.exp(-b) * self.mat.T**2 / self.mat.Nv / self.mat.vth_p
+
+            group_data = {
+                'members': np.column_stack((x_sel, y_sel, c_sel)),
+                'x_fit': x_fit,
+                'y_fit': y_fit,
+                'Ea': activation_energy,
+                'sigma0': cross_section,
+                'intercept': b
+            }
+            self.trap_groups.append(group_data)
+            
+            self.grouped_points.update(indices)
+            self.selected = set()
+
+            num_g = len(self.line_artists)
+            ls_list = ['-',':','--','-.',(0,(1,10)),(0,(1,5)),(0,(1,1)),(5,(10,3))]
+            linestyle = ls_list[num_g] if num_g < len(ls_list) else ls_list[-1]
+
+            new_line, = self.ax.plot(x_line, y_line, color=color, lw=self.line_lw, linestyle=linestyle)
+            self.line_artists.append(new_line)
+
+            if cross_section is not None:
+                label = fr"$Group\ {num_g+1}: E_a={activation_energy:.3f}eV, \sigma={cross_section:.2e}cm^2$"
+            else:
+                label = fr"$Group\ {num_g+1}: E_a={activation_energy:.3f}eV$"
+                
+            self.line_labels.append(label)
+
+            if self.temp_line_artist:
+                self.temp_line_artist.remove()
+                self.temp_line_artist = None
+                
+            self._update_line_legend()
+            self._update_layers()
+
+        except Exception as e:
+            import traceback
+            print(f"Error in get_group: {e}")
+            traceback.print_exc()
