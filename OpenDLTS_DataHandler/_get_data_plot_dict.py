@@ -17,7 +17,7 @@ def get_data_plot_dict(data_scaling_factor: float, data_type: str, data_x_type: 
         data_plot_dict['C_unit'] = 'V'
     elif data_type in ['R','Resistance',r'$R_{on}$']:
         data_type_plot = 'Resistance'
-        data_plot_dict['C_unit'] = r'$\mathrm{\Omega}$'
+        data_plot_dict['C_unit'] = 'Ohm'
     else:
         raise ValueError("data_type = 'C' | 'I' | 'V' | 'Vth' | 'R'")
     
