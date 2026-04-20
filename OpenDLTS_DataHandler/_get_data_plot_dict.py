@@ -15,8 +15,11 @@ def get_data_plot_dict(data_scaling_factor: float, data_type: str, data_x_type: 
     elif data_type in ['Vth',r'$\Delta V_{th}$']:
         data_type_plot = r'$\Delta V_{th}$'
         data_plot_dict['C_unit'] = 'V'
+    elif data_type in ['R','Resistance',r'$R_{on}$']:
+        data_type_plot = 'Resistance'
+        data_plot_dict['C_unit'] = r'$\mathrm{\Omega}$'
     else:
-        raise ValueError("data_type = 'C' | 'I' | 'V' | 'Vth'")
+        raise ValueError("data_type = 'C' | 'I' | 'V' | 'Vth' | 'R'")
     
     if data_x_type in ['Time','time','t']:
         data_x_type_plot = 'Time'
