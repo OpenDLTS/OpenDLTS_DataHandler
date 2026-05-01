@@ -210,6 +210,7 @@ class Data_Loader:
             raise TypeError(f"Unsupported operand type(s) for -: 'Data_Loader' and '{type(other).__name__}'")
             
         # merge t
+        '''
         new_t = np.intersect1d(self.t, other.t)
         if not new_t.any():
             raise ValueError("Time axes (t) mismatch between Data_Loader instances.")
@@ -218,6 +219,13 @@ class Data_Loader:
         t_indices2 = np.searchsorted(other.t, new_t)
         C_1 = self.C[:, t_indices1]
         C_2 = other.C[:, t_indices2]
+        '''
+        # 以被减实例的t为准
+        new_t = self.t
+        C_1 = self.C
+        C_2 = np.zeros_like(C_1)
+        for i,_ in enumerate(self.T):
+            C_2[i] = np.interp(new_t, other.t, other.C[i])
         
         # merge T
         sub_T_tol = self._sub_T_tol
