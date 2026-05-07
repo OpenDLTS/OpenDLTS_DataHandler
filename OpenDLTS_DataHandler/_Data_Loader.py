@@ -272,74 +272,6 @@ class Data_Loader:
         new_loader.transient_data_full_path = self.transient_data_full_path
         return new_loader
 
-    def __sub__(self, other: 'Data_Loader') -> 'Data_Loader':
-        """
-        Subtract two Data_Loader instances.
-        
-        Args:
-            other (Data_Loader): The instance to subtract from self.
-            
-        Returns:
-            Data_Loader: A new instance with C = self.C - other.C
-        """
-        if not isinstance(other, Data_Loader):
-            raise TypeError(f"Unsupported operand type(s) for -: 'Data_Loader' and '{type(other).__name__}'")
-            
-        # merge t
-        new_t = np.intersect1d(self.t, other.t)
-        if not new_t.any():
-            raise ValueError("Time axes (t) mismatch between Data_Loader instances.")
-        
-        t_indices1 = np.searchsorted(self.t, new_t)
-        t_indices2 = np.searchsorted(other.t, new_t)
-        C_1 = self.C[:, t_indices1]
-        C_2 = other.C[:, t_indices2]
-        
-        # merge T
-        sub_T_tol = self._sub_T_tol
-        new_T = []
-        T_indices1 = []
-        T_indices2 = []
-        
-        for si,sT in enumerate(self.T):
-            for oi,oT in enumerate(other.T):
-                if np.abs(sT - oT) < sub_T_tol:
-                    new_T.append((sT+oT)/2)
-                    T_indices1.append(si)
-                    T_indices2.append(oi)
-                    break
-        new_T = np.array(new_T)
-        if not new_T.any():
-            raise ValueError("Condition axes (T) mismatch between Data_Loader instances.")
-        
-        T_indices1 = np.array(T_indices1)
-        T_indices2 = np.array(T_indices2)
-        C_1 = C_1[T_indices1,:]
-        C_2 = C_2[T_indices2,:]
-            
-        new_C = C_1 / self.data_scaling_factor - C_2 / other.data_scaling_factor
-        
-        new_transient_data = {
-            't': new_t,
-            'T': new_T,
-            'C': new_C
-        }
-        new_loader = Data_Loader(
-            transient_data=new_transient_data,
-            raw_data_scaling_factor=1.0,
-            time_shift=0.0,
-            T_shift=0.0,
-            data_scaling_factor=self.data_scaling_factor,
-            data_type=self.data_type,
-            data_x_type=self.data_x_type,
-            condition_type=self.condition_type,
-            logging_level=self.logging_level,
-            logging_file=None,
-            logging_file_clear=False
-        )
-        new_loader.transient_data_full_path = self.transient_data_full_path
-        return new_loader
-    
     def __neg__(self) -> 'Data_Loader':
         """
         Negate the Data_Loader instance.
@@ -387,6 +319,7 @@ class Data_Loader:
         """
         if not isinstance(other, Data_Loader):
             raise TypeError(f"Unsupported operand type(s) for &: 'Data_Loader' and '{type(other).__name__}'")
+        '''
         # merge t
         new_t = np.intersect1d(self.t, other.t)
         if not new_t.any():
@@ -395,6 +328,14 @@ class Data_Loader:
         t_indices2 = np.searchsorted(other.t, new_t)
         C_1 = self.C[:, t_indices1]
         C_2 = other.C[:, t_indices2]
+        '''
+        # 以被减实例的t为准
+        new_t = self.t
+        C_1 = self.C
+        C_2 = np.zeros_like(other.C)
+        for i,_ in enumerate(other.T):
+            C_2[i] = np.interp(new_t, other.t, other.C[i])
+        
         # merge T
         new_T = np.unique(np.concatenate((self.T,other.T)), sorted=True)
         new_C = np.zeros((len(new_T),len(new_t)))

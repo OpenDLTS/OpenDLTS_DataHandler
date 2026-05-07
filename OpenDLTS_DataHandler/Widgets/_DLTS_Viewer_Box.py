@@ -104,7 +104,7 @@ class DLTS_Viewer_Box:
             description='tc1:', layout=widgets.Layout(width='10%'), style={'description_width': 'initial'}
         )
         self.cf_target_em = widgets.BoundedFloatText(
-            value=100, min=10, max=1000,
+            value=100, min=1e-6, max=1e6,
             description='Target em:', layout=widgets.Layout(width='10%'), style={'description_width': 'initial'}
         )
         self.cf_target_em_btn = widgets.Button(
